@@ -58,7 +58,7 @@ typedef struct
 typedef struct
 {
 	uint16_t mode;
-	float wheel_T;//轮毂电机的输出扭矩，单位为N
+	float wheel_T;      //轮毂电机的输出扭矩，单位为N
 	
 	motor_fbpara_t para;	
 }Wheel_Motor_t ;
@@ -86,6 +86,7 @@ extern uint32_t FloatTohex(float HEX);//浮点数到十六进制转换
 
 extern float uint_to_float(int x_int, float x_min, float x_max, int bits);
 extern int float_to_uint(float x_float, float x_min, float x_max, int bits);
+void move_to_distance(hcan_t* hcan, Joint_Motor_t *motor, float target_distance);
 
 #endif /* __DM4310_DRV_H__ */
 

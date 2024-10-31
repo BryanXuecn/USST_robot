@@ -2,6 +2,20 @@
 
 #include "fdcan.h"
 #include "arm_math.h"
+#include "observe_task.h"
+
+// 定义一些宏和常量
+#define TARGET_DISTANCE 5.0f            // 目标距离，单位为米
+#define DISTANCE_PER_UNIT 1.0f          // 单位换算比例
+#define INITIAL_SPEED 1.0f              // 初始速度，单位 m/s
+#define FINAL_APPROACH_SPEED 0.3f       // 接近目标时的最终速度
+#define POSITION_TOLERANCE 0.01f        // 位置容差，单位为米
+#define MAX_SPEED 1.0f                  // 最大速度限制
+
+// dm4310_drv.c
+Joint_Motor_t motor;  // 定义 motor 变量
+extern chassis_t chassis_move; // 底盘控制参数结构体
+	
 
 float Hex_To_Float(uint32_t *Byte,int num)//十六进制到浮点数
 {
@@ -275,4 +289,49 @@ void mit_ctrl2(hcan_t* hcan, uint16_t motor_id, float pos, float vel,float kp, f
 }
 
 
+void move_to_distance(hcan_t* hcan, Joint_Motor_t *motor, float target_distance)
+{
+    // 启动电机控制模式
+    enable_motor_mode(hcan, motor->para.id, MIT_MODE);
 
+    // 初始化变量
+    float start_position = chassis_move.x_filter;  // 使用卡尔曼滤波后的初始位置
+    float target_position = start_position + target_distance; // 目标位置
+    float kp = 0.5f;  // 位置控制比例增益
+    float kd = 0.01f; // 微分增益，用于速度平滑
+    float velocity_setpoint = 0.0f;  // 速度设定
+    uint32_t timeout_counter = 0;
+    const uint32_t MAX_TIMEOUT = 5000;  // 最大循环等待次数
+
+    while (fabsf(chassis_move.x_filter - target_position) > 0.01f)  // 距离误差判断
+    {
+        if (timeout_counter++ > MAX_TIMEOUT) {
+            break;  // 超过最大等待时间退出循环
+        }
+
+        // 实时更新电机反馈数据
+        uint8_t rx_data[8];
+        uint32_t data_len = FDCAN_DLC_BYTES_8;
+        dm4310_fbdata(motor, rx_data, data_len); 
+
+        // 计算当前的位置信息和剩余距离
+        float current_position = chassis_move.x_filter;
+        float remaining_distance = target_position - current_position;
+
+        // 使用比例控制来逐步减小速度设定值
+        velocity_setpoint = kp * remaining_distance;  
+        
+        // 防止设定速度过大或过小
+        velocity_setpoint = fminf(fmaxf(velocity_setpoint, -1.0f), 1.0f);
+
+        // 控制电机，使其速度逐渐接近设定值
+        mit_ctrl2(hcan, motor->para.id, chassis_move.x_filter, velocity_setpoint, kp, kd, 0.0f);
+        
+		HAL_Delay(3);
+        //osDelay(OBSERVE_TIME);  // 根据任务周期延时
+    }
+
+    // 停止电机并禁用模式
+    mit_ctrl2(hcan, motor->para.id, chassis_move.x_filter, 0.0f, kp, kd, 0.0f);
+    disable_motor_mode(hcan, motor->para.id, MIT_MODE);
+}
